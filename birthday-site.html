@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Happy Birthday</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: #050002; color: #fff; font-family: Georgia, 'Times New Roman', serif; }
+
+  #heart { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+  #heart.tappable { pointer-events: auto; cursor: pointer; }
+
+  main { position: relative; z-index: 1; }
+  section.line { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center; }
+  section.line p { max-width: 24ch; font-size: clamp(1.5rem, 5.6vw, 2.6rem); line-height: 1.4;
+    opacity: 0; transform: translateY(24px); transition: opacity .8s ease, transform .8s ease;
+    text-shadow: 0 0 24px #000, 0 0 12px #000; }
+  section.line.note p { font-size: clamp(1.1rem, 4vw, 1.7rem); font-style: italic; color: #ffb3c1; max-width: 30ch; }
+  section.line.visible p { opacity: 1; transform: none; }
+
+  #scroll-cue { position: fixed; bottom: 4vh; width: 100%; text-align: center; z-index: 2; font-size: .9rem; opacity: .5; animation: bob 1.8s infinite; transition: opacity .5s; pointer-events: none; }
+  @keyframes bob { 50% { transform: translateY(6px); } }
+  #tap-hint { position: fixed; bottom: 12vh; width: 100%; text-align: center; z-index: 2; opacity: 0; transition: opacity .8s; font-size: 1.1rem; letter-spacing: .08em; color: #ffb3c1; pointer-events: none; }
+  #tap-hint.show { opacity: 1; }
+
+  #reveal { position: fixed; inset: 0; z-index: 3; display: none; align-items: center; justify-content: center; text-align: center; background: #050002; padding: 2rem; opacity: 0; transition: opacity 1.2s; }
+  #reveal.show { display: flex; }
+  #reveal.fade { opacity: 1; }
+  #reveal p { font-size: 1.4rem; max-width: 28ch; line-height: 1.5; color: #ffb3c1; }
+</style>
+</head>
+<body>
+
+<canvas id="heart"></canvas>
+<main id="story"></main>
+<div id="scroll-cue">scroll ↓</div>
+<div id="tap-hint">tap the heart</div>
+<div id="reveal"><p>Cake and gift boxes go here.</p></div>
+
+<script>
+/* =========================================================
+   1. STORYLINE: one string = one screen. "~" = soft italic note.
+   ========================================================= */
+const NAME = "Mani";
+const SCENES = [
+  { name: "The beginning", lines: [
+    "In a world full of ordinary things...",
+    "...somehow, you became my favourite extraordinary one." ] },
+  { name: "The unexpected", lines: [
+    "I never planned for you.",
+    "I never knew that a person could become such a beautiful part of someone's everyday life." ] },
+  { name: "The little things", lines: [
+    "It's funny, isn't it?",
+    "How the smallest things can become the ones we remember the most.",
+    "~A conversation. A laugh. A moment. You." ] },
+  { name: "What you mean", lines: [
+    "Some people leave impressions.",
+    "Some leave memories.",
+    "And some quietly become a part of your story." ] },
+  { name: "The build-up", lines: [
+    "And if I could give you one thing...",
+    "It wouldn't be a perfect world.",
+    "It would be a thousand little moments that remind you how special your existence is." ] },
+  { name: "The last scroll", lines: [
+    `Well, ${NAME}...`,
+    "You've reached the end of this little journey.",
+    "But I haven't shown you everything yet." ] }
+];
+const TAPS_NEEDED = 3;
+
+const story = document.getElementById('story');
+SCENES.forEach((sc, i) => sc.lines.forEach(t => {
+  const s = document.createElement('section');
+  const note = t.startsWith('~');
+  s.className = 'line' + (note ? ' note' : '');
+  s.dataset.scene = i;
+  s.innerHTML = `<p>${note ? t.slice(1) : t}</p>`;
+  story.appendChild(s);
+}));
+
+/* =========================================================
+   2. THE HEART (your Python turtle code, ported to canvas)
+   ========================================================= */
+const cv = document.getElementById('heart');
+const ctx = cv.getContext('2d');
+const N_POINTS = innerWidth < 600 ? 1500 : 2200;
+const ROTATE_SPEED = 0.8;                       // rad/s (slow, like a dark showcase)
+const FAR = [70, 0, 10], NEAR = [255, 30, 50], DARK = [26, 2, 8];
+let W, H, DPR;
+function resize() {
+  DPR = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR; cv.style.width = W + 'px'; cv.style.height = H + 'px';
+}
+resize(); addEventListener('resize', resize);
+
+function heartCurve(u) {
+  return [1.6 * Math.sin(u) ** 3,
+          1.3 * Math.cos(u) - 0.5 * Math.cos(2 * u) - 0.2 * Math.cos(3 * u) - 0.1 * Math.cos(4 * u)];
+}
+let ymin = 1e9, ymax = -1e9;
+for (let k = 0; k < 720; k++) { const y = heartCurve(k / 720 * 2 * Math.PI)[1]; ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); }
+const yc = (ymin + ymax) / 2;
+
+const pts = [];
+for (let i = 0; i < N_POINTS; i++) {
+  const [hx, hy] = heartCurve(Math.random() * 2 * Math.PI);
+  const rad = Math.sqrt(Math.random());
+  pts.push({ x: hx * rad, y: hy * rad, z: 1.1 * (1 - rad) * (Math.random() * 2 - 1), vx: 0, vy: 0, vz: 0, xr: 0, zr: 0 });
+}
+const order = pts.slice();
+const sparks = Array.from({ length: 60 }, () => ({ a: Math.random() * 6.28, r: 1.3 + Math.random() * 1.6, s: .15 + Math.random() * .3, z: 1 + Math.random() * 1.6 }));
+
+const lerp = (a, b, f) => a + (b - a) * f;
+const clamp01 = v => Math.max(0, Math.min(1, v));
+
+/* ---- state ---- */
+window.heartProgress = 0;   // 0..1 from scroll
+window.heartScene = 0;      // 0..5
+let sp = 0, theta = 0, targetTheta = 0, sparkA = 0, last = performance.now();
+let finaleOn = false, exploding = false, exT = 0;
+let pulseMode = 'none', pulseStart = 0, shakeUntil = 0;
+
+function draw(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  sp += ((finaleOn ? 1 : window.heartProgress) - sp) * Math.min(1, dt * 5);
+
+  if (finaleOn && !exploding) theta += (targetTheta - theta) * Math.min(1, dt * 2.5);   // turn to face her
+  else theta += ROTATE_SPEED * dt * (exploding ? 0.3 : 1);
+
+  // pulse
+  let scaleF = 1;
+  if (pulseMode === 'three') {
+    const k = (now - pulseStart) / 1200;
+    if (k < 3) scaleF = 1 + 0.07 * Math.sin(Math.PI * (k % 1)); else pulseMode = 'soft';
+  }
+  if (pulseMode === 'soft') scaleF = 1 + 0.03 * Math.sin(now / 1000 * 2.6);
+  const shake = Math.sin(now * 0.05) * 10 * Math.max(0, (shakeUntil - now) / 300);
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const S = Math.min(W * 0.62 / 3.2, H * 0.5 / 2.9) * scaleF;
+  const cx = W / 2 + shake, cy = H / 2;
+
+  // soft glow behind heart
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, S * 2.4);
+  g.addColorStop(0, `rgba(255,30,60,${0.05 + 0.2 * sp})`);
+  g.addColorStop(1, 'rgba(255,30,60,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  const ct = Math.cos(theta), st = Math.sin(theta);
+  const thr = ymax - sp * (ymax - ymin + 0.3);          // light travels from the top lobes down to the tip
+  const alpha = exploding ? Math.max(0, 1 - (now - exT) / 2400) : 1;
+
+  for (const p of pts) {
+    if (exploding) { p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.vy -= 1.1 * dt; }
+    p.xr = p.x * ct + p.z * st;
+    p.zr = -p.x * st + p.z * ct;
+  }
+  order.sort((a, b) => a.zr - b.zr);
+
+  if (alpha > 0) {
+    for (const p of order) {
+      const depth = clamp01((p.zr + 1.1) / 2.2);
+      let L = clamp01((p.y - thr) / 0.3);
+      const base = 0.1 + 0.4 * Math.max(0, 1 - Math.hypot(p.x, p.y - yc) / 1.0);   // faint glow from the centre
+      L = Math.max(L, exploding ? 1 : base);
+      const r = lerp(DARK[0], lerp(FAR[0], NEAR[0], depth), L);
+      const gC = lerp(DARK[1], lerp(FAR[1], NEAR[1], depth), L);
+      const b = lerp(DARK[2], lerp(FAR[2], NEAR[2], depth), L);
+      ctx.fillStyle = `rgba(${r | 0},${gC | 0},${b | 0},${alpha})`;
+      ctx.beginPath();
+      ctx.arc(cx + p.xr * S, cy - (p.y - yc) * S, (2 + depth * 2.5) / 2 * (S / 100), 0, 6.283);
+      ctx.fill();
+    }
+  }
+
+  // orbiting red sparks (appear from scene 2)
+  sparkA += ((window.heartScene >= 1 && !exploding ? 1 : 0) - sparkA) * Math.min(1, dt * 0.8);
+  if (sparkA > 0.01) {
+    ctx.fillStyle = `rgba(255,70,100,${0.7 * sparkA})`;
+    for (const s of sparks) {
+      s.a += s.s * dt;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(s.a) * s.r * S, cy + Math.sin(s.a * 1.3) * s.r * S * 0.7, s.z, 0, 6.283);
+      ctx.fill();
+    }
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+/* =========================================================
+   3. SCROLL, SCENES, FINALE, TAPS, EXPLOSION
+   ========================================================= */
+const cue = document.getElementById('scroll-cue');
+const hint = document.getElementById('tap-hint');
+const sections = [...document.querySelectorAll('section.line')];
+let armed = false, taps = 0;
+
+function onScroll() {
+  const max = document.documentElement.scrollHeight - innerHeight;
+  const p = max > 0 ? clamp01(scrollY / max) : 0;
+  window.heartProgress = p;
+  window.dispatchEvent(new CustomEvent('heartprogress', { detail: { progress: p } }));
+  cue.style.opacity = p > 0.03 ? 0 : 0.5;
+  if (p > 0.985 && !armed) finale();
+}
+addEventListener('scroll', onScroll, { passive: true });
+
+function setScene(i) {
+  window.heartScene = i;
+  if (i >= 3 && pulseMode === 'none') pulseMode = 'soft';   // scene 4: subtle pulse
+  window.dispatchEvent(new CustomEvent('heartscene', { detail: { scene: i, name: SCENES[i].name } }));
+}
+const io = new IntersectionObserver(es => es.forEach(e => {
+  e.target.classList.toggle('visible', e.isIntersecting);
+  if (e.isIntersecting) setScene(+e.target.dataset.scene);
+}), { threshold: 0.6 });
+sections.forEach(s => io.observe(s));
+
+function finale() {
+  armed = true;
+  document.body.style.overflow = 'hidden';                  // scrolling stops
+  finaleOn = true;
+  targetTheta = Math.ceil(theta / (2 * Math.PI)) * 2 * Math.PI;   // rotate to face her
+  pulseMode = 'three'; pulseStart = performance.now();      // three faint pulses
+  window.dispatchEvent(new Event('heartfinale'));
+  setTimeout(() => { cv.classList.add('tappable'); hint.classList.add('show'); }, 3800);
+}
+
+cv.addEventListener('click', () => {
+  if (!armed || !cv.classList.contains('tappable') || taps >= TAPS_NEEDED) return;
+  taps++;
+  shakeUntil = performance.now() + 300;
+  window.dispatchEvent(new CustomEvent('hearttap', { detail: { count: taps } }));
+  hint.textContent = taps < TAPS_NEEDED ? `${TAPS_NEEDED - taps} more…` : '';
+  if (taps === TAPS_NEEDED) explode();
+});
+
+function explode() {
+  cv.classList.remove('tappable');
+  hint.classList.remove('show');
+  pulseMode = 'none';
+  exploding = true; exT = performance.now();
+  for (const p of pts) {                                    // every point flies outward from the centre
+    const dx = p.x, dy = p.y - yc, dz = p.z + (Math.random() - .5) * .4;
+    const len = Math.hypot(dx, dy, dz) || 1, sp2 = 1.5 + Math.random() * 3.5;
+    p.vx = dx / len * sp2; p.vy = dy / len * sp2; p.vz = dz / len * sp2;
+  }
+  window.dispatchEvent(new Event('heartexplode'));
+  setTimeout(() => {                                        // swap for your cake + gift boxes
+    const r = document.getElementById('reveal');
+    r.classList.add('show'); requestAnimationFrame(() => r.classList.add('fade'));
+  }, 1800);
+}
+onScroll();
+</script>
+</body>
+</html>
