@@ -11,7 +11,7 @@
   #heart { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
   #heart.tappable { pointer-events: auto; cursor: pointer; }
 
-  main { position: relative; z-index: 1; }
+  main { position: relative; z-index: 1; pointer-events: none; }
   section.line { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center; }
   section.line p { max-width: 24ch; font-size: clamp(1.5rem, 5.6vw, 2.6rem); line-height: 1.4;
     opacity: 0; transform: translateY(24px); transition: opacity .8s ease, transform .8s ease;
@@ -229,7 +229,7 @@ function finale() {
   setTimeout(() => { cv.classList.add('tappable'); hint.classList.add('show'); }, 3800);
 }
 
-cv.addEventListener('click', () => {
+document.addEventListener('click', () => {
   if (!armed || !cv.classList.contains('tappable') || taps >= TAPS_NEEDED) return;
   taps++;
   shakeUntil = performance.now() + 300;
