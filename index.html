@@ -7,37 +7,41 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { background: #050002; color: #fff; font-family: Georgia, 'Times New Roman', serif; }
-
   #heart { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
   #heart.tappable { pointer-events: auto; cursor: pointer; }
-
-  main { position: relative; z-index: 1; pointer-events: none; }
+  main { position: relative; z-index: 1; pointer-events: none; transition: opacity 1s ease; }
   section.line { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center; }
   section.line p { max-width: 24ch; font-size: clamp(1.5rem, 5.6vw, 2.6rem); line-height: 1.4;
     opacity: 0; transform: translateY(24px); transition: opacity .8s ease, transform .8s ease;
     text-shadow: 0 0 24px #000, 0 0 12px #000; }
   section.line.note p { font-size: clamp(1.1rem, 4vw, 1.7rem); font-style: italic; color: #ffb3c1; max-width: 30ch; }
   section.line.visible p { opacity: 1; transform: none; }
-
   #scroll-cue { position: fixed; bottom: 4vh; width: 100%; text-align: center; z-index: 2; font-size: .9rem; opacity: .5; animation: bob 1.8s infinite; transition: opacity .5s; pointer-events: none; }
   @keyframes bob { 50% { transform: translateY(6px); } }
   #tap-hint { position: fixed; bottom: 12vh; width: 100%; text-align: center; z-index: 2; opacity: 0; transition: opacity .8s; font-size: 1.1rem; letter-spacing: .08em; color: #ffb3c1; pointer-events: none; }
   #tap-hint.show { opacity: 1; }
-
-  #reveal { position: fixed; inset: 0; z-index: 3; display: none; align-items: center; justify-content: center; text-align: center; background: #050002; padding: 2rem; opacity: 0; transition: opacity 1.2s; }
-  #reveal.show { display: flex; }
-  #reveal.fade { opacity: 1; }
-  #reveal p { font-size: 1.4rem; max-width: 28ch; line-height: 1.5; color: #ffb3c1; }
+  #inscription { position: fixed; bottom: 7vh; width: 100%; text-align: center; z-index: 2; opacity: 0; transition: opacity 2.5s;
+    font-size: clamp(1.2rem, 4.6vw, 2rem); letter-spacing: .14em; color: #d9b66a; text-shadow: 0 0 18px rgba(217,182,106,.45); pointer-events: none; }
+  #inscription.show { opacity: 1; }
+  #prompt { position: fixed; top: 8vh; width: 100%; padding: 0 1.5rem; text-align: center; z-index: 2; opacity: 0; transition: opacity 1.2s;
+    font-size: clamp(1.3rem, 5vw, 2.2rem); font-style: italic; color: #ffb3c1; text-shadow: 0 0 18px rgba(255,120,150,.45); pointer-events: none; }
+  #prompt.show { opacity: 1; }
+  #meter { position: fixed; top: 17vh; left: 50%; width: min(60vw, 240px); height: 4px; transform: translateX(-50%); z-index: 2;
+    background: rgba(255,255,255,.12); border-radius: 4px; opacity: 0; transition: opacity 1.2s; pointer-events: none; overflow: hidden; }
+  #meter.show { opacity: 1; }
+  #meter i { display: block; height: 100%; width: 0; background: #ff6b8a; border-radius: 4px; }
 </style>
 </head>
 <body>
-
+ 
 <canvas id="heart"></canvas>
 <main id="story"></main>
 <div id="scroll-cue">scroll ↓</div>
 <div id="tap-hint">tap the heart</div>
-<div id="reveal"><p>Cake and gift boxes go here.</p></div>
-
+<div id="inscription"></div>
+<div id="prompt"></div>
+<div id="meter"><i></i></div>
+ 
 <script>
 /* =========================================================
    1. STORYLINE: one string = one screen. "~" = soft italic note.
@@ -68,7 +72,8 @@ const SCENES = [
     "But I haven't shown you everything yet." ] }
 ];
 const TAPS_NEEDED = 3;
-
+const INSCRIPTION = `Happy Birthday, ${NAME}`;
+ 
 const story = document.getElementById('story');
 SCENES.forEach((sc, i) => sc.lines.forEach(t => {
   const s = document.createElement('section');
@@ -78,14 +83,17 @@ SCENES.forEach((sc, i) => sc.lines.forEach(t => {
   s.innerHTML = `<p>${note ? t.slice(1) : t}</p>`;
   story.appendChild(s);
 }));
-
+document.getElementById('inscription').textContent = INSCRIPTION;
+ 
 /* =========================================================
-   2. THE HEART (your Python turtle code, ported to canvas)
+   2. THE HEART (point cloud) + CAKE (same points reassemble)
    ========================================================= */
 const cv = document.getElementById('heart');
 const ctx = cv.getContext('2d');
+const TAU = Math.PI * 2;
 const N_POINTS = innerWidth < 600 ? 1500 : 2200;
-const ROTATE_SPEED = 0.8;                       // rad/s (slow, like a dark showcase)
+const CAKE_POINTS = innerWidth < 600 ? 3800 : 5600;
+const ROTATE_SPEED = 0.8;
 const FAR = [70, 0, 10], NEAR = [255, 30, 50], DARK = [26, 2, 8];
 let W, H, DPR;
 function resize() {
@@ -93,42 +101,212 @@ function resize() {
   cv.width = W * DPR; cv.height = H * DPR; cv.style.width = W + 'px'; cv.style.height = H + 'px';
 }
 resize(); addEventListener('resize', resize);
-
+ 
 function heartCurve(u) {
   return [1.6 * Math.sin(u) ** 3,
           1.3 * Math.cos(u) - 0.5 * Math.cos(2 * u) - 0.2 * Math.cos(3 * u) - 0.1 * Math.cos(4 * u)];
 }
 let ymin = 1e9, ymax = -1e9;
-for (let k = 0; k < 720; k++) { const y = heartCurve(k / 720 * 2 * Math.PI)[1]; ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); }
+for (let k = 0; k < 720; k++) { const y = heartCurve(k / 720 * TAU)[1]; ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); }
 const yc = (ymin + ymax) / 2;
-
+ 
 const pts = [];
 for (let i = 0; i < N_POINTS; i++) {
-  const [hx, hy] = heartCurve(Math.random() * 2 * Math.PI);
+  const [hx, hy] = heartCurve(Math.random() * TAU);
   const rad = Math.sqrt(Math.random());
-  pts.push({ x: hx * rad, y: hy * rad, z: 1.1 * (1 - rad) * (Math.random() * 2 - 1), vx: 0, vy: 0, vz: 0, xr: 0, zr: 0 });
+  pts.push({ x: hx * rad, y: hy * rad, z: 1.1 * (1 - rad) * (Math.random() * 2 - 1), vx: 0, vy: 0, vz: 0, xr: 0, yr: 0, zr: 0 });
 }
-const order = pts.slice();
+let order = pts.slice();
 const sparks = Array.from({ length: 60 }, () => ({ a: Math.random() * 6.28, r: 1.3 + Math.random() * 1.6, s: .15 + Math.random() * .3, z: 1 + Math.random() * 1.6 }));
-
+ 
 const lerp = (a, b, f) => a + (b - a) * f;
 const clamp01 = v => Math.max(0, Math.min(1, v));
-
+ 
+/* ---- cake geometry (same units as the heart) ---- */
+const TIERS = [{ R: 1.2, y0: -0.9, y1: -0.25 }, { R: 0.9, y0: -0.25, y1: 0.35 }, { R: 0.6, y0: 0.35, y1: 0.85 }];
+const CANDLE_ANG = [Math.PI / 2 + 1.05, Math.PI / 2 + 1.05 + 2.094, Math.PI / 2 + 1.05 + 4.189];
+const CANDLE_R = 0.28, CANDLE_TOP = 1.28;
+const EMBLEM_Y = 0.05;
+ 
+function buildTargets(n) {
+  const T = [], rnd = Math.random, q = f => Math.round(n * f);
+  const sh = a => 0.45 + 0.55 * Math.max(0, Math.cos(a - (Math.PI / 2 + 0.6)));        // light from front-left
+  const col = (c, f) => [Math.min(255, c[0] * f), Math.min(255, c[1] * f), Math.min(255, c[2] * f)];
+  const add = (r, a, y, c, kind) => T.push({ r, a, y: y + yc, col: c, kind: kind || 0 });
+  const GOLD = [200, 150, 62], CRIM = [150, 14, 30];
+ 
+  // tier bodies (sides + exposed tops)
+  const parts = []; let A = 0;
+  TIERS.forEach((t, i) => {
+    const Rn = i < 2 ? TIERS[i + 1].R : 0, h = t.y1 - t.y0;
+    parts.push({ t, Rn, kind: 'lat', area: TAU * t.R * h });
+    parts.push({ t, Rn, kind: 'top', area: Math.PI * (t.R * t.R - Rn * Rn) });
+  });
+  parts.forEach(p => A += p.area);
+  const lateral = t => { const a = rnd() * TAU; add(t.R, a, t.y0 + rnd() * (t.y1 - t.y0), col([40, 40, 50], sh(a) * (0.8 + 0.5 * rnd()))); };
+  parts.forEach(p => {
+    const c = Math.round(q(0.52) * p.area / A);
+    for (let k = 0; k < c; k++) {
+      if (p.kind === 'lat') lateral(p.t);
+      else {
+        const a = rnd() * TAU, r = Math.sqrt(p.Rn * p.Rn + rnd() * (p.t.R * p.t.R - p.Rn * p.Rn));
+        add(r, a, p.t.y1, col([62, 62, 78], 0.8 + 0.5 * rnd()));
+      }
+    }
+  });
+ 
+  // red icing edge + drips on the two lower tiers
+  [0, 1].forEach(i => {
+    const t = TIERS[i], h = t.y1 - t.y0;
+    for (let k = 0; k < q(0.015); k++) add(t.R + 0.012, rnd() * TAU, t.y1 - rnd() * 0.07, col(CRIM, 0.9 + 0.5 * rnd()));
+    const M = 16, per = Math.max(4, Math.round(q(0.045) / M));
+    for (let m = 0; m < M; m++) {
+      const a0 = rnd() * TAU, len = 0.12 + rnd() * rnd() * h * 0.8;
+      for (let k = 0; k < per; k++) add(t.R + 0.016, a0 + (rnd() - 0.5) * 0.03, t.y1 - rnd() * len, col(CRIM, 0.8 + 0.7 * rnd()));
+      add(t.R + 0.02, a0, t.y1 - len - 0.01, [230, 40, 60]);
+    }
+  });
+ 
+  // gold stand: plate, rim, filigree, stem, foot
+  for (let k = 0; k < q(0.05); k++) add(1.2 + rnd() * 0.3, rnd() * TAU, -0.9, col([42, 38, 40], 0.8 + 0.5 * rnd()));
+  for (let k = 0; k < q(0.04); k++) add(1.5, rnd() * TAU, -0.9 - rnd() * 0.1, col(GOLD, 0.8 + 0.6 * rnd()));
+  for (let k = 0; k < q(0.02); k++) add(1.2 + rnd() * 0.3, rnd() * TAU, -1.02 - rnd() * 0.1, col(GOLD, 0.6 + 0.4 * rnd()));
+  for (let k = 0; k < q(0.03); k++) { const y = -1.45 + rnd() * 0.45, a = rnd() * TAU; add(0.1 + 0.07 * (0.5 + 0.5 * Math.sin(y * 16)), a, y, col(GOLD, sh(a) * (0.8 + 0.5 * rnd()))); }
+  for (let k = 0; k < q(0.03); k++) { const y = -1.5 + rnd() * 0.1, rm = 0.75 - (y + 1.5) * 5; add(Math.sqrt(rnd()) * rm, rnd() * TAU, y, col(GOLD, 0.7 + 0.5 * rnd())); }
+ 
+  // beaded gold rings at the base of each tier
+  TIERS.forEach(t => { const c = q(0.0117); for (let k = 0; k < c; k++) add(t.R + 0.025, k / c * TAU, t.y0 + 0.03, col(GOLD, 0.7 + 0.2 * rnd())); });
+ 
+  // three candles
+  CANDLE_ANG.forEach(ca => {
+    const cx0 = CANDLE_R * Math.cos(ca), cz0 = CANDLE_R * Math.sin(ca);
+    for (let k = 0; k < q(0.0117); k++) {
+      const pa = rnd() * TAU, x = cx0 + 0.04 * Math.cos(pa), z = cz0 + 0.04 * Math.sin(pa);
+      add(Math.hypot(x, z), Math.atan2(z, x), 0.85 + rnd() * 0.38, col([238, 228, 205], 0.6 + 0.5 * sh(pa)));
+    }
+    add(CANDLE_R, ca, 1.25, [40, 30, 30]);
+  });
+ 
+  // small heart on the middle tier (it pulses)
+  for (let k = 0; k < q(0.04); k++) {
+    const [hx, hy] = heartCurve(rnd() * TAU), rad = Math.sqrt(rnd());
+    add(TIERS[1].R + 0.025, Math.PI / 2 - hx * rad * 0.115 / TIERS[1].R, EMBLEM_Y + (hy * rad - yc) * 0.115, [255, 45, 75], 1);
+  }
+ 
+  while (T.length < n) lateral(TIERS[(rnd() * 3) | 0]);
+  T.length = n;
+  for (let i = n - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; [T[i], T[j]] = [T[j], T[i]]; }
+  return T;
+}
+ 
 /* ---- state ---- */
 window.heartProgress = 0;   // 0..1 from scroll
 window.heartScene = 0;      // 0..5
-let sp = 0, theta = 0, targetTheta = 0, sparkA = 0, last = performance.now();
-let finaleOn = false, exploding = false, exT = 0;
+let sp = 0, theta = 0, targetTheta = 0, sparkA = 0, last = performance.now(), pitch = 0;
+let finaleOn = false, exploding = false, exT = 0, settle = false, phase = 0, buildT0 = 0, flameT0 = 0;
 let pulseMode = 'none', pulseStart = 0, shakeUntil = 0;
-
+let promptOn = false, candlesDone = false, tapFallback = false, blowAmt = 0, blowTime = 0, audioCtx = null;
+const outAt = [0, 0, 0], smoke = [];
+ 
+/* ---- the solid cake that gradually appears over the dotted one ---- */
+const DRIPS = [0, 1].map(() => Array.from({ length: 20 }, () => ({
+  a: 0.12 + Math.random() * (Math.PI - 0.24), len: 0.15 + Math.random() * Math.random() * 0.65, w: 0.7 + Math.random() * 0.6 })));
+ 
+function drawSolidCake(alpha, cx, cy, S, cp, spn, beat) {
+  const Y = (y, z = 0) => cy - (y * cp - z * spn) * S;
+  const grad = (x0, x1, stops) => { const g = ctx.createLinearGradient(x0, 0, x1, 0); stops.forEach(s => g.addColorStop(s[0], s[1])); return g; };
+  const GOLD = (R) => grad(cx - R * S, cx + R * S, [[0, '#6e4f1c'], [0.35, '#e2b65a'], [0.6, '#a67a30'], [1, '#4d3512']]);
+  const BLACK = (R) => grad(cx - R * S, cx + R * S, [[0, '#0d0d12'], [0.3, '#383843'], [0.55, '#18181e'], [1, '#07070a']]);
+  const TOP = (R) => grad(cx - R * S, cx + R * S, [[0, '#2a2a35'], [0.4, '#3d3d4a'], [1, '#101015']]);
+ 
+  ctx.save(); ctx.globalAlpha = alpha;
+  const cyl = (R, y0, y1, body, top, edge) => {
+    const rx = R * S, ry = R * S * spn, yt = Y(y1), yb = Y(y0);
+    ctx.beginPath();
+    ctx.moveTo(cx - rx, yt); ctx.lineTo(cx - rx, yb);
+    ctx.ellipse(cx, yb, rx, ry, 0, Math.PI, 0, true);
+    ctx.lineTo(cx + rx, yt);
+    ctx.ellipse(cx, yt, rx, ry, 0, 0, Math.PI, true);
+    ctx.closePath(); ctx.fillStyle = body; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx, yt, rx, ry, 0, 0, TAU); ctx.fillStyle = top; ctx.fill();
+    ctx.strokeStyle = edge; ctx.lineWidth = 1.2; ctx.stroke();
+  };
+ 
+  // gold stand: foot, stem, plate
+  ctx.beginPath(); ctx.ellipse(cx, Y(-1.5), 0.75 * S, 0.75 * S * spn, 0, 0, TAU); ctx.fillStyle = GOLD(0.75); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx, Y(-1.42), 0.35 * S, 0.35 * S * spn, 0, 0, TAU); ctx.fillStyle = GOLD(0.35); ctx.fill();
+  ctx.fillStyle = grad(cx - 0.09 * S, cx + 0.09 * S, [[0, '#6e4f1c'], [0.4, '#e2b65a'], [1, '#4d3512']]);
+  ctx.fillRect(cx - 0.09 * S, Y(-1.42), 0.18 * S, Y(-1.0) - Y(-1.42));
+  ctx.beginPath(); ctx.ellipse(cx, Y(-1.2), 0.15 * S, 0.05 * S, 0, 0, TAU); ctx.fillStyle = GOLD(0.15); ctx.fill();
+  cyl(1.5, -1.0, -0.9, GOLD(1.5), '#17100e', '#e2b65a');
+  ctx.strokeStyle = 'rgba(226,182,90,0.8)'; ctx.lineWidth = 1.2;
+  for (let k = 0; k < 26; k++) {                       // hanging lace on the plate edge
+    const a = (k + 0.5) / 26 * Math.PI;
+    ctx.beginPath(); ctx.arc(cx + 1.5 * S * Math.cos(a), Y(-1.0, 1.5 * Math.sin(a)) + 0.02 * S, 0.03 * S, 0, Math.PI); ctx.stroke();
+  }
+ 
+  // tiers, bottom to top
+  TIERS.forEach((t, i) => {
+    cyl(t.R, t.y0, t.y1, BLACK(t.R), TOP(t.R), 'rgba(150,150,185,0.35)');
+    if (i < 2) {
+      ctx.beginPath(); ctx.ellipse(cx, Y(t.y1), t.R * S, t.R * S * spn, 0, 0, Math.PI);
+      ctx.strokeStyle = '#8a0f1f'; ctx.lineWidth = 0.05 * S; ctx.stroke();      // red icing edge
+      ctx.lineCap = 'round';
+      DRIPS[i].forEach(d => {
+        const x = cx + t.R * S * Math.cos(d.a), y0s = Y(t.y1, t.R * Math.sin(d.a)), len = d.len * (t.y1 - t.y0) * cp * S;
+        ctx.strokeStyle = '#8e0f1e'; ctx.lineWidth = d.w * 0.032 * S;
+        ctx.beginPath(); ctx.moveTo(x, y0s); ctx.lineTo(x, y0s + len); ctx.stroke();
+        ctx.strokeStyle = 'rgba(214,58,80,0.6)'; ctx.lineWidth = 0.008 * S;
+        ctx.beginPath(); ctx.moveTo(x - 0.008 * S, y0s); ctx.lineTo(x - 0.008 * S, y0s + len * 0.9); ctx.stroke();
+      });
+      ctx.lineCap = 'butt';
+    }
+    ctx.fillStyle = 'rgba(200,150,62,0.9)';                                   // gold beads at the base
+    for (let k = 0; k <= 44; k++) {
+      const a = k / 44 * Math.PI;
+      ctx.beginPath(); ctx.arc(cx + t.R * S * Math.cos(a), Y(t.y0 + 0.03, t.R * Math.sin(a)), 0.014 * S, 0, TAU); ctx.fill();
+    }
+    if (i === 1) {                                                            // the pulsing heart
+      const ex = cx, ey = Y(EMBLEM_Y, t.R), k = 0.115 * S * (1 + 0.12 * beat);
+      ctx.beginPath();
+      for (let u = 0; u <= 80; u++) {
+        const [hx, hy] = heartCurve(u / 80 * TAU);
+        const px = ex + hx * k, py = ey - (hy - yc) * k * cp;
+        u ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      }
+      ctx.closePath();
+      ctx.shadowColor = 'rgba(255,40,70,0.9)'; ctx.shadowBlur = 10 + 20 * beat;
+      ctx.fillStyle = 'rgba(255,45,75,0.95)'; ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  });
+ 
+  // candles, back one first
+  CANDLE_ANG.slice().sort((a, b) => Math.sin(a) - Math.sin(b)).forEach(ca => {
+    const z = CANDLE_R * Math.sin(ca), x = cx + CANDLE_R * Math.cos(ca) * S;
+    const yb = Y(0.85, z), yt = Y(1.28, z), w = 0.07 * S;
+    ctx.fillStyle = grad(x - w / 2, x + w / 2, [[0, '#a89a82'], [0.4, '#f2e8d2'], [1, '#8f8470']]);
+    ctx.fillRect(x - w / 2, yt, w, yb - yt);
+    ctx.beginPath(); ctx.ellipse(x, yt, w / 2, w / 2 * spn, 0, 0, TAU); ctx.fillStyle = '#f7efdc'; ctx.fill();
+    ctx.strokeStyle = '#2a1e1c'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x, yt); ctx.lineTo(x, yt - 0.025 * S); ctx.stroke();
+  });
+  ctx.restore();
+}
+ 
 function draw(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   sp += ((finaleOn ? 1 : window.heartProgress) - sp) * Math.min(1, dt * 5);
-
-  if (finaleOn && !exploding) theta += (targetTheta - theta) * Math.min(1, dt * 2.5);   // turn to face her
+  if (promptOn && !candlesDone) {                     // sustained blowing puts the candles out one by one
+    blowTime = blowAmt > 0.5 ? blowTime + dt : Math.max(0, blowTime - dt * 0.5);
+    [0.15, 0.3, 0.45].forEach((th, i) => { if (blowTime > th) snuff(i, now); });
+  }
+ 
+  if (settle) theta += (targetTheta - theta) * Math.min(1, dt * 1.2);
+  else if (finaleOn && !exploding) theta += (targetTheta - theta) * Math.min(1, dt * 2.5);
   else theta += ROTATE_SPEED * dt * (exploding ? 0.3 : 1);
-
-  // pulse
+  pitch += ((settle ? 0.3 : 0) - pitch) * Math.min(1, dt * 1.2);
+ 
   let scaleF = 1;
   if (pulseMode === 'three') {
     const k = (now - pulseStart) / 1200;
@@ -136,45 +314,125 @@ function draw(now) {
   }
   if (pulseMode === 'soft') scaleF = 1 + 0.03 * Math.sin(now / 1000 * 2.6);
   const shake = Math.sin(now * 0.05) * 10 * Math.max(0, (shakeUntil - now) / 300);
-
+ 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, W, H);
-  const S = Math.min(W * 0.62 / 3.2, H * 0.5 / 2.9) * scaleF;
-  const cx = W / 2 + shake, cy = H / 2;
-
-  // soft glow behind heart
+  const cakeMode = phase === 2;
+  const S = Math.min(W * 0.62 / 3.2, H * (cakeMode ? 0.40 : 0.5) / 2.9) * scaleF;
+  const cx = W / 2 + shake, cy = H / 2 - (cakeMode ? H * 0.04 : 0);
+ 
+  const ct = Math.cos(theta), st = Math.sin(theta), cp = Math.cos(pitch), spn = Math.sin(pitch);
+  const P = (x, y, z) => { const z0 = -x * st + z * ct; return [cx + (x * ct + z * st) * S, cy - ((y - yc) * cp - z0 * spn) * S]; };
+ 
+  const beat = Math.pow(0.5 + 0.5 * Math.sin(now / 1000 * TAU * 1.1), 3);
+  const settled = cakeMode ? clamp01((now - buildT0 - 3000) / 1500) : 0;
+ 
+  // soft glow behind the heart / cake
+  const glowA = (0.05 + 0.2 * sp) * (1 - settled * 0.6) + settled * 0.09 * beat;
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, S * 2.4);
-  g.addColorStop(0, `rgba(255,30,60,${0.05 + 0.2 * sp})`);
+  g.addColorStop(0, `rgba(255,30,60,${glowA})`);
   g.addColorStop(1, 'rgba(255,30,60,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-
-  const ct = Math.cos(theta), st = Math.sin(theta);
-  const thr = ymax - sp * (ymax - ymin + 0.3);          // light travels from the top lobes down to the tip
-  const alpha = exploding ? Math.max(0, 1 - (now - exT) / 2400) : 1;
-
+ 
+  // move points
   for (const p of pts) {
-    if (exploding) { p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.vy -= 1.1 * dt; }
+    if (cakeMode) {
+      const u = clamp01((now - buildT0 - p.delay) / 2200);
+      const e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+      p.e = e;
+      const r = lerp(p.sr, p.tr, e), a = p.sa + p.da * e + 8 * e * (1 - e);
+      p.x = r * Math.cos(a); p.z = r * Math.sin(a); p.y = lerp(p.sy, p.ty, e);
+    } else if (exploding) {
+      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.vy -= 1.1 * dt;
+    }
     p.xr = p.x * ct + p.z * st;
-    p.zr = -p.x * st + p.z * ct;
+    const z0 = -p.x * st + p.z * ct, yy = p.y - yc;
+    p.yr = yy * cp - z0 * spn; p.zr = yy * spn + z0 * cp;
   }
   order.sort((a, b) => a.zr - b.zr);
-
-  if (alpha > 0) {
+ 
+  if (!cakeMode) {
+    const thr = ymax - sp * (ymax - ymin + 0.3);          // light travels from the top lobes down to the tip
     for (const p of order) {
       const depth = clamp01((p.zr + 1.1) / 2.2);
       let L = clamp01((p.y - thr) / 0.3);
-      const base = 0.1 + 0.4 * Math.max(0, 1 - Math.hypot(p.x, p.y - yc) / 1.0);   // faint glow from the centre
+      const base = 0.1 + 0.4 * Math.max(0, 1 - Math.hypot(p.x, p.y - yc) / 1.0);
       L = Math.max(L, exploding ? 1 : base);
       const r = lerp(DARK[0], lerp(FAR[0], NEAR[0], depth), L);
       const gC = lerp(DARK[1], lerp(FAR[1], NEAR[1], depth), L);
       const b = lerp(DARK[2], lerp(FAR[2], NEAR[2], depth), L);
-      ctx.fillStyle = `rgba(${r | 0},${gC | 0},${b | 0},${alpha})`;
+      ctx.fillStyle = `rgb(${r | 0},${gC | 0},${b | 0})`;
       ctx.beginPath();
-      ctx.arc(cx + p.xr * S, cy - (p.y - yc) * S, (2 + depth * 2.5) / 2 * (S / 100), 0, 6.283);
+      ctx.arc(cx + p.xr * S, cy - p.yr * S, (2 + depth * 2.5) / 2 * (S / 100), 0, 6.283);
       ctx.fill();
     }
+  } else {
+    // after the candles are lit, the whole cake gradually becomes solid
+    const s0 = clamp01((now - flameT0 - 2600) / 5000), solid = s0 * s0 * (3 - 2 * s0);
+    if (solid > 0) drawSolidCake(solid, cx, cy, S, cp, spn, beat);
+    ctx.globalAlpha = 1 - 0.8 * solid;               // the dots stay behind as a faint shimmer
+    for (const p of order) {
+      const depth = clamp01((p.zr + 1.6) / 3.2), f = 0.5 + 0.5 * depth;
+      let tr = p.col[0] * f, tg = p.col[1] * f, tb = p.col[2] * f, size = (1.7 + depth * 1.5) * S / 100;
+      if (p.kind === 1) { const k = 1 + 0.8 * beat * settled; tr = Math.min(255, tr * k); tg = Math.min(255, tg * k); tb = Math.min(255, tb * k); size *= 1 + 0.35 * beat * settled; }
+      const e = p.e;
+      const r = lerp(lerp(FAR[0], NEAR[0], depth), tr, e), gC = lerp(lerp(FAR[1], NEAR[1], depth), tg, e), b = lerp(lerp(FAR[2], NEAR[2], depth), tb, e);
+      ctx.fillStyle = `rgb(${r | 0},${gC | 0},${b | 0})`;
+      ctx.fillRect(cx + p.xr * S - size / 2, cy - p.yr * S - size / 2, size, size);
+    }
+    ctx.globalAlpha = 1;
+ 
+    // heartbeat ripple from the heart on the cake
+    if (settled > 0) {
+      const [ex, ey] = P(0, EMBLEM_Y + yc, TIERS[1].R);
+      const ph = (now / 1000 * 1.1) % 1;
+      ctx.strokeStyle = `rgba(255,40,70,${0.35 * settled * (1 - ph) * (1 - ph)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(ex, ey, S * (0.1 + 0.7 * ph), 0, TAU); ctx.stroke();
+    }
+ 
+    // candle flames, lit one after another
+    ctx.globalCompositeOperation = 'lighter';
+    let litSum = 0;
+    CANDLE_ANG.forEach((ca, i) => {
+      const lit = clamp01((now - flameT0 - i * 900) / 500) * (1 - (outAt[i] ? clamp01((now - outAt[i]) / 250) : 0));
+      if (lit <= 0) return;
+      litSum += lit;
+      const [fx, fy] = P(CANDLE_R * Math.cos(ca), CANDLE_TOP + 0.07 + yc, CANDLE_R * Math.sin(ca));
+      const bl = promptOn ? blowAmt : 0;
+      const fl = (0.85 + 0.15 * Math.sin(now / 90 + i * 2) + 0.08 * Math.sin(now / 37 + i)) * (1 - 0.3 * bl) + (Math.random() - 0.5) * 0.25 * bl;
+      const gg = ctx.createRadialGradient(fx, fy, 0, fx, fy, S * 0.45 * fl * lit);
+      gg.addColorStop(0, `rgba(255,150,50,${0.35 * lit})`); gg.addColorStop(1, 'rgba(255,150,50,0)');
+      ctx.fillStyle = gg; ctx.fillRect(fx - S, fy - S, S * 2, S * 2);
+      ctx.fillStyle = 'rgba(255,190,80,0.9)';
+      ctx.beginPath(); ctx.ellipse(fx, fy - S * 0.04 * fl, S * 0.028 * fl * lit, S * 0.07 * fl * lit, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(255,245,200,0.95)';
+      ctx.beginPath(); ctx.ellipse(fx, fy - S * 0.02 * fl, S * 0.012 * lit, S * 0.035 * fl * lit, 0, 0, TAU); ctx.fill();
+    });
+    if (litSum > 0) {
+      const [tx, ty] = P(0, 0.9 + yc, 0);
+      const tg2 = ctx.createRadialGradient(tx, ty, 0, tx, ty, S * 1.4);
+      tg2.addColorStop(0, `rgba(255,170,70,${0.10 * litSum / 3})`); tg2.addColorStop(1, 'rgba(255,170,70,0)');
+      ctx.fillStyle = tg2; ctx.fillRect(0, 0, W, H);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+ 
+    // smoke from candles that were just blown out
+    for (let m = smoke.length - 1; m >= 0; m--) {
+      const sm = smoke[m], age = (now - sm.t0) / 1000;
+      if (age > 3) { smoke.splice(m, 1); continue; }
+      const [bx, by] = P(CANDLE_R * Math.cos(sm.ca), CANDLE_TOP + 0.07 + yc, CANDLE_R * Math.sin(sm.ca));
+      for (let k = 0; k < 6; k++) {
+        const a2 = age - k * 0.12;
+        if (a2 < 0) continue;
+        ctx.fillStyle = `rgba(200,200,212,${0.28 * Math.max(0, 1 - a2 / 2.4)})`;
+        ctx.beginPath();
+        ctx.arc(bx + Math.sin(a2 * 3 + k) * S * 0.03 * (1 + a2), by - a2 * S * 0.25, S * (0.02 + 0.03 * a2), 0, TAU);
+        ctx.fill();
+      }
+    }
   }
-
+ 
   // orbiting red sparks (appear from scene 2)
   sparkA += ((window.heartScene >= 1 && !exploding ? 1 : 0) - sparkA) * Math.min(1, dt * 0.8);
   if (sparkA > 0.01) {
@@ -189,15 +447,15 @@ function draw(now) {
   requestAnimationFrame(draw);
 }
 requestAnimationFrame(draw);
-
+ 
 /* =========================================================
-   3. SCROLL, SCENES, FINALE, TAPS, EXPLOSION
+   3. SCROLL, SCENES, FINALE, TAPS, EXPLOSION, CAKE
    ========================================================= */
 const cue = document.getElementById('scroll-cue');
 const hint = document.getElementById('tap-hint');
 const sections = [...document.querySelectorAll('section.line')];
 let armed = false, taps = 0;
-
+ 
 function onScroll() {
   const max = document.documentElement.scrollHeight - innerHeight;
   const p = max > 0 ? clamp01(scrollY / max) : 0;
@@ -207,10 +465,10 @@ function onScroll() {
   if (p > 0.985 && !armed) finale();
 }
 addEventListener('scroll', onScroll, { passive: true });
-
+ 
 function setScene(i) {
   window.heartScene = i;
-  if (i >= 3 && pulseMode === 'none') pulseMode = 'soft';   // scene 4: subtle pulse
+  if (i >= 3 && pulseMode === 'none') pulseMode = 'soft';
   window.dispatchEvent(new CustomEvent('heartscene', { detail: { scene: i, name: SCENES[i].name } }));
 }
 const io = new IntersectionObserver(es => es.forEach(e => {
@@ -218,17 +476,17 @@ const io = new IntersectionObserver(es => es.forEach(e => {
   if (e.isIntersecting) setScene(+e.target.dataset.scene);
 }), { threshold: 0.6 });
 sections.forEach(s => io.observe(s));
-
+ 
 function finale() {
   armed = true;
-  document.body.style.overflow = 'hidden';                  // scrolling stops
+  document.body.style.overflow = 'hidden';
   finaleOn = true;
-  targetTheta = Math.ceil(theta / (2 * Math.PI)) * 2 * Math.PI;   // rotate to face her
-  pulseMode = 'three'; pulseStart = performance.now();      // three faint pulses
+  targetTheta = Math.ceil(theta / TAU) * TAU;
+  pulseMode = 'three'; pulseStart = performance.now();
   window.dispatchEvent(new Event('heartfinale'));
   setTimeout(() => { cv.classList.add('tappable'); hint.classList.add('show'); }, 3800);
 }
-
+ 
 document.addEventListener('click', () => {
   if (!armed || !cv.classList.contains('tappable') || taps >= TAPS_NEEDED) return;
   taps++;
@@ -237,23 +495,120 @@ document.addEventListener('click', () => {
   hint.textContent = taps < TAPS_NEEDED ? `${TAPS_NEEDED - taps} more…` : '';
   if (taps === TAPS_NEEDED) explode();
 });
-
+ 
 function explode() {
   cv.classList.remove('tappable');
   hint.classList.remove('show');
   pulseMode = 'none';
+  story.style.opacity = 0;                          // fade the text away on the explosion
   exploding = true; exT = performance.now();
-  for (const p of pts) {                                    // every point flies outward from the centre
+  for (const p of pts) {
     const dx = p.x, dy = p.y - yc, dz = p.z + (Math.random() - .5) * .4;
-    const len = Math.hypot(dx, dy, dz) || 1, sp2 = 1.5 + Math.random() * 3.5;
-    p.vx = dx / len * sp2; p.vy = dy / len * sp2; p.vz = dz / len * sp2;
+    const len = Math.hypot(dx, dy, dz) || 1, v = 1.5 + Math.random() * 3.5;
+    p.vx = dx / len * v; p.vy = dy / len * v; p.vz = dz / len * v;
   }
   window.dispatchEvent(new Event('heartexplode'));
-  setTimeout(() => {                                        // swap for your cake + gift boxes
-    const r = document.getElementById('reveal');
-    r.classList.add('show'); requestAnimationFrame(() => r.classList.add('fade'));
-  }, 1800);
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch (e) {}   // made during her tap so iOS allows it
+  setTimeout(startCake, 1700);
 }
+ 
+function startCake() {
+  const N0 = pts.length;
+  for (let i = N0; i < CAKE_POINTS; i++) {          // extra fragments so the cake looks solid
+    const s = pts[(Math.random() * N0) | 0];
+    pts.push({ x: s.x + (Math.random() - .5) * .3, y: s.y + (Math.random() - .5) * .3, z: s.z + (Math.random() - .5) * .3, vx: 0, vy: 0, vz: 0, xr: 0, yr: 0, zr: 0 });
+  }
+  order = pts.slice();
+  const T = buildTargets(pts.length);
+  pts.forEach((p, i) => {
+    const t = T[i];
+    p.tr = t.r; p.ta = t.a; p.ty = t.y; p.col = t.col; p.kind = t.kind;
+    p.sr = Math.hypot(p.x, p.z); p.sa = Math.atan2(p.z, p.x); p.sy = p.y;
+    let da = (p.ta - p.sa) % TAU; if (da > Math.PI) da -= TAU; if (da < -Math.PI) da += TAU;
+    p.da = da; p.delay = Math.random() * 1400; p.e = 0;
+  });
+  buildT0 = performance.now(); flameT0 = buildT0 + 3900;
+  phase = 2; settle = true;
+  targetTheta = Math.ceil((theta + 1) / TAU) * TAU;   // settle facing her
+  setTimeout(() => {
+    document.getElementById('inscription').classList.add('show');
+    window.dispatchEvent(new Event('cakeready'));     // hook for the gift boxes
+  }, 3900 + 2700 + 600);
+  setTimeout(showBlowPrompt, 9500);                  // once the solid cake has mostly faded in
+}
+ 
+/* =========================================================
+   4. BLOW OUT THE CANDLES (microphone)
+   ========================================================= */
+const promptEl = document.getElementById('prompt');
+const meterEl = document.getElementById('meter'), meterFill = meterEl.firstElementChild;
+ 
+function showBlowPrompt() {
+  promptEl.textContent = 'Blow out the candles';
+  promptEl.classList.add('show');
+  promptOn = true;
+  meterEl.classList.add('show');
+  startMic();
+  setTimeout(() => {                                  // if nothing happened, offer the tap fallback
+    if (!candlesDone) { tapFallback = true; promptEl.textContent = 'Blow into your microphone, or tap the cake'; }
+  }, 10000);
+}
+ 
+function micFailed() {
+  tapFallback = true;
+  if (!candlesDone) promptEl.textContent = 'Tap the cake to blow out the candles';
+}
+ 
+async function startMic() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }   // keep the breath noise
+    });
+    const ac = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (ac.state !== 'running') { try { await ac.resume(); } catch (e) {} }
+    const an = ac.createAnalyser();
+    an.fftSize = 1024; an.smoothingTimeConstant = 0;
+    const mute = ac.createGain(); mute.gain.value = 0;
+    ac.createMediaStreamSource(stream).connect(an);
+    an.connect(mute); mute.connect(ac.destination);        // some browsers only process audio that reaches the output
+    const buf = new Float32Array(an.fftSize);
+    const t0 = performance.now();
+    let base = 0.003, smooth = 0, peak = 0;
+    (function listen() {
+      if (candlesDone) { stream.getTracks().forEach(t => t.stop()); return; }
+      an.getFloatTimeDomainData(buf);
+      let s = 0; for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+      const rms = Math.sqrt(s / buf.length);
+      smooth += (rms - smooth) * 0.35;
+      peak = Math.max(peak, smooth);
+      const el = performance.now() - t0;
+      if (el < 800) base = Math.max(base, smooth);          // learn the room noise first
+      const thr = Math.max(base * 4, 0.03);                 // blowing = clearly louder than the room
+      blowAmt = el < 800 ? 0 : clamp01((smooth - thr * 0.6) / (thr * 1.2));
+      meterFill.style.width = (blowAmt * 100) + '%';
+      if (el > 6000 && peak < 0.002) { micFailed(); }       // the mic is giving silence
+      requestAnimationFrame(listen);
+    })();
+  } catch (e) { micFailed(); }
+}
+ 
+function snuff(i, now) {
+  if (outAt[i]) return;
+  outAt[i] = now;
+  smoke.push({ ca: CANDLE_ANG[i], t0: now });
+  if (outAt.every(Boolean)) finishCandles();
+}
+ 
+function finishCandles() {
+  candlesDone = true; promptOn = false; blowAmt = 0;
+  promptEl.classList.remove('show'); meterEl.classList.remove('show');
+  setTimeout(() => { promptEl.textContent = 'Make a wish…'; promptEl.classList.add('show'); }, 1300);
+  setTimeout(() => promptEl.classList.remove('show'), 5500);
+  window.dispatchEvent(new Event('candlesout'));      // hook for the gift boxes
+}
+ 
+document.addEventListener('click', () => { if (promptOn && tapFallback && !candlesDone) blowTime = 1; });
+ 
 onScroll();
 </script>
 </body>
